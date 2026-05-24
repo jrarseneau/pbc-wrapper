@@ -13,9 +13,11 @@ Usage:
 
 import argparse
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -207,6 +209,61 @@ def build_txz(version: str, pkg_dir: Path, output_dir: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Post-build verification
+# ---------------------------------------------------------------------------
+
+def verify_package(pkg_path: Path) -> None:
+    """Open the .txz and simulate what installpkg does with slack-desc."""
+    # Derive package name the same way Slackware's installpkg does:
+    # strip -version-arch-build.txz from the end (last three dash-fields + ext)
+    stem = pkg_path.stem  # e.g. pbc-wrapper-4.2.0-x86_64-1
+    pkg_name = re.sub(r'-[^-]+-[^-]+-[^-]+$', '', stem)
+
+    print(f"\nVerifying package (simulated installpkg, name='{pkg_name}'):")
+
+    try:
+        with tarfile.open(pkg_path, "r:xz") as tf:
+            names = tf.getnames()
+
+            # Check binaries
+            for entry in names:
+                if entry.startswith("./usr/local/bin/") or entry.startswith("usr/local/bin/"):
+                    print(f"  {entry}")
+
+            # Check slack-desc
+            desc_member = next(
+                (m for m in tf.getmembers()
+                 if m.name in ("./install/slack-desc", "install/slack-desc")),
+                None,
+            )
+            if desc_member is None:
+                print("  WARNING: install/slack-desc not found in package!", file=sys.stderr)
+                return
+
+            content = tf.extractfile(desc_member).read().decode("ascii", errors="replace")
+            desc_lines = [
+                line for line in content.splitlines()
+                if line.startswith(f"{pkg_name}:")
+            ]
+            if not desc_lines:
+                print(
+                    f"  WARNING: no lines matching '{pkg_name}:' found in slack-desc!",
+                    file=sys.stderr,
+                )
+                print(
+                    f"  Hint: check that slack-desc lines start with '{pkg_name}:'",
+                    file=sys.stderr,
+                )
+            else:
+                print(f"\nPACKAGE DESCRIPTION (as installpkg will show it):")
+                for line in desc_lines[:11]:
+                    after_colon = line.split(":", 1)[1] if ":" in line else ""
+                    print(f"  {after_colon}")
+    except Exception as e:
+        print(f"  WARNING: could not verify package: {e}", file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -312,6 +369,8 @@ def main() -> None:
     for name in sorted(set(all_binaries) | {"pbc-wrapper"}):
         print(f"  /usr/local/bin/{name}")
     print("  /etc/pbs-client/repos.d/  (created by doinst.sh)")
+
+    verify_package(pkg_path)
 
 
 if __name__ == "__main__":

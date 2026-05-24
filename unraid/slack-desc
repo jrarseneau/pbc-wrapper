@@ -10,8 +10,8 @@ pbc-wrapper: pbc-wrapper (proxmox-backup-client wrapper and static binaries)
 pbc-wrapper:
 pbc-wrapper: Provides statically-linked proxmox-backup-client and pxar binaries
 pbc-wrapper: from the Proxmox project, together with pbc-wrapper: a Python
-pbc-wrapper: wrapper that loads PBS repository credentials from named .env
-pbc-wrapper: profile files — keeping secrets out of shell history and scripts.
+pbc-wrapper: script that loads PBS repository credentials from named .env
+pbc-wrapper: profile files, keeping secrets out of shell history and scripts.
 pbc-wrapper:
 pbc-wrapper: Default profile directory: /etc/pbs-client/repos.d/
 pbc-wrapper: Unraid users may also use /mnt/user/appdata/pbs/repos.d/
