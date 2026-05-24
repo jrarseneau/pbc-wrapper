@@ -3,6 +3,7 @@
 # Place me at /usr/local/bin/pbs-client and chmod +x.
 # Default repo directory can be overridden with PBS_PROFILE_DIR or /etc/pbs-client/repos.d
 
+import logging
 import os
 import re
 import stat
@@ -26,11 +27,30 @@ DEFAULT_DIRS = [
     "/etc/pbs-client/repos.d",
 ]
 
+log = logging.getLogger("pbs-client")
+
+
+def setup_logging(level_name: str) -> None:
+    level = getattr(logging, level_name.upper(), None)
+    if not isinstance(level, int):
+        print(f"pbs-client: invalid log level '{level_name}'", file=sys.stderr)
+        sys.exit(1)
+    logging.basicConfig(
+        level=level,
+        format="pbs-client: %(levelname)s: %(message)s",
+        stream=sys.stderr,
+    )
+    log.debug("log level set to %s", level_name.upper())
+
 
 def find_profile_dir() -> str:
     for d in DEFAULT_DIRS:
-        if d and Path(d).is_dir():
+        if not d:
+            continue
+        if Path(d).is_dir():
+            log.debug("profile directory found: %s", d)
             return d
+        log.debug("profile directory candidate not found: %s", d)
     return ""
 
 
@@ -39,13 +59,17 @@ def usage(profile_dir: str) -> None:
 pbs-client — wrapper for proxmox-backup-client using named repository profiles
 
 Usage:
-  pbs-client [--profile-dir DIR] [--default NAME] [--list]
+  pbs-client [--profile-dir DIR] [--log-level LEVEL] [--default NAME] [--list]
              <proxmox-backup-client subcommand and args…>
 
 Examples:
   pbs-client backup vm.qcow2:/path --repository my-pbs
   pbs-client --list
   pbs-client --default my-pbs backup …      # use NAME if --repository not provided
+  pbs-client --log-level debug backup …     # verbose wrapper output
+
+Log levels (default WARNING, also via PBS_LOG_LEVEL env var):
+  debug, info, warning, error
 
 Profiles live in: {profile_dir}
 Each profile is a file named NAME.env containing environment lines, e.g.:
@@ -67,22 +91,23 @@ def list_profiles(profile_dir: str) -> None:
 
 def load_profile_env(profile_dir: str, name: str) -> None:
     path = Path(profile_dir) / f"{name}.env"
+    log.debug("loading profile '%s' from %s", name, path)
+
     if not path.is_file():
-        print(f"pbs-client: profile '{name}' not found at {path}", file=sys.stderr)
+        log.error("profile '%s' not found at %s", name, path)
         sys.exit(2)
 
     try:
         mode = stat.S_IMODE(path.stat().st_mode)
+        log.debug("%s permissions: %o", path, mode)
         if mode > 0o600:
-            print(
-                f"pbs-client: warning: {path} permissions are loose; consider chmod 600.",
-                file=sys.stderr,
-            )
+            log.warning("%s permissions are loose; consider chmod 600.", path)
     except OSError:
         pass
 
     # Matches: KEY="value", KEY='value', KEY=value
     line_re = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$')
+    loaded: list[str] = []
 
     with path.open() as f:
         for line in f:
@@ -91,14 +116,20 @@ def load_profile_env(profile_dir: str, name: str) -> None:
                 continue
             m = line_re.match(line)
             if not m:
+                log.debug("skipping unparseable line in %s", path)
                 continue
             key, val = m.group(1), m.group(2)
             if key not in ALLOWED_KEYS:
+                log.debug("ignoring disallowed key '%s'", key)
                 continue
             # Strip surrounding single or double quotes
             if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
                 val = val[1:-1]
             os.environ[key] = val
+            loaded.append(key)
+            log.debug("set env var %s", key)
+
+    log.info("loaded profile '%s': set %s", name, ", ".join(loaded) if loaded else "(nothing)")
 
 
 def looks_like_repo_string(value: str) -> bool:
@@ -108,15 +139,36 @@ def looks_like_repo_string(value: str) -> bool:
 def main() -> None:
     args = sys.argv[1:]
 
-    # --- Resolve --profile-dir before anything else ---
+    # --- Bootstrap logging from env before touching args ---
+    log_level = os.environ.get("PBS_LOG_LEVEL", "WARNING")
+
+    # --- Consume --profile-dir and --log-level before anything else ---
     profile_dir = find_profile_dir()
 
-    if args and args[0] == "--profile-dir":
-        if len(args) < 2:
-            print("pbs-client: --profile-dir requires an argument", file=sys.stderr)
-            sys.exit(1)
-        profile_dir = args[1]
-        args = args[2:]
+    remaining: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--profile-dir":
+            if i + 1 >= len(args):
+                print("pbs-client: --profile-dir requires an argument", file=sys.stderr)
+                sys.exit(1)
+            profile_dir = args[i + 1]
+            log.debug("--profile-dir override: %s", profile_dir)
+            i += 2
+        elif args[i] == "--log-level":
+            if i + 1 >= len(args):
+                print("pbs-client: --log-level requires an argument", file=sys.stderr)
+                sys.exit(1)
+            log_level = args[i + 1]
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+
+    setup_logging(log_level)
+    args = remaining
+
+    log.debug("profile directory: %s", profile_dir or "(none)")
 
     # --- Early-exit flags ---
     if not args or args[0] in ("--help", "-h"):
@@ -125,10 +177,7 @@ def main() -> None:
 
     if args[0] == "--list":
         if not profile_dir:
-            print(
-                "pbs-client: no profile directory found.",
-                file=sys.stderr,
-            )
+            log.error("no profile directory found.")
             sys.exit(1)
         list_profiles(profile_dir)
         sys.exit(0)
@@ -137,22 +186,24 @@ def main() -> None:
     default_profile = ""
     if args and args[0] == "--default":
         if len(args) < 2:
-            print("pbs-client: --default requires an argument", file=sys.stderr)
+            log.error("--default requires an argument")
             sys.exit(1)
         default_profile = args[1]
+        log.debug("default profile: %s", default_profile)
         args = args[2:]
 
     # --- Require a profile dir from here on ---
     if not profile_dir:
-        print(
-            "pbs-client: no profile directory found. Create one, e.g.: /mnt/user/appdata/pbs/repos.d",
-            file=sys.stderr,
+        log.error(
+            "no profile directory found. Create one, e.g.: /mnt/user/appdata/pbs/repos.d"
         )
         print(
             "           or run: pbs-client --profile-dir /path/to/repos.d ...",
             file=sys.stderr,
         )
         sys.exit(1)
+
+    log.info("using profile directory: %s", profile_dir)
 
     # --- Parse --repository / -r from the remaining args ---
     repo_arg = ""
@@ -161,29 +212,36 @@ def main() -> None:
     while i < len(args):
         if args[i] in ("--repository", "-r"):
             if i + 1 >= len(args):
-                print(f"pbs-client: {args[i]} requires an argument", file=sys.stderr)
+                log.error("%s requires an argument", args[i])
                 sys.exit(2)
             repo_arg = args[i + 1]
+            log.debug("found %s: %s", args[i], repo_arg)
             i += 2
         elif args[i] in ("--profile-dir", "--default", "--list"):
-            print(
-                f"pbs-client: internal option '{args[i]}' should be used before subcommand.",
-                file=sys.stderr,
-            )
+            log.error("option '%s' must be used before the subcommand.", args[i])
             sys.exit(2)
         else:
             pass_args.append(args[i])
             i += 1
 
     if not repo_arg and default_profile:
+        log.debug("no --repository given; falling back to default profile '%s'", default_profile)
         repo_arg = default_profile
 
     # --- Resolve repo_arg to env or pass-through ---
     if repo_arg:
         if looks_like_repo_string(repo_arg):
+            log.info("treating --repository value as a direct repo string")
+            log.debug("setting PBS_REPOSITORY from argument")
             os.environ["PBS_REPOSITORY"] = repo_arg
         else:
+            log.info("loading profile '%s'", repo_arg)
             load_profile_env(profile_dir, repo_arg)
+    else:
+        log.debug("no repository argument; relying on environment")
+
+    log.info("exec: %s %s", PROXMOX_CLIENT, " ".join(pass_args))
+    log.debug("pass_args: %r", pass_args)
 
     # --- Exec proxmox-backup-client ---
     os.execv(PROXMOX_CLIENT, [PROXMOX_CLIENT] + pass_args)
