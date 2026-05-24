@@ -258,7 +258,7 @@ def main() -> None:
     # for all subcommands, so pass it on the command line to be safe.
     keyfile = os.environ.get("PBS_KEYFILE", "")
     if keyfile and "--keyfile" not in pass_args:
-        pass_args = ["--keyfile", keyfile] + pass_args
+        pass_args = pass_args + ["--keyfile", keyfile]
         log.debug("injected --keyfile %s into args", keyfile)
 
     log.info("exec: %s %s", PROXMOX_CLIENT, " ".join(pass_args))
