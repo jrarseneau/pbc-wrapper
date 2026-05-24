@@ -9,6 +9,29 @@ A small Python wrapper around `proxmox-backup-client` that loads repository cred
 
 ## Installation
 
+### Unraid (recommended)
+
+Build a Slackware `.txz` package that bundles the statically-linked
+`proxmox-backup-client`, `pxar`, and `pbc-wrapper` together:
+
+```bash
+cd unraid
+python3 build.py                        # pulls from Proxmox bookworm repo
+python3 build.py --distro trixie        # or trixie
+python3 build.py --list-packages        # see all available packages
+```
+
+The `.txz` is written to the `unraid/` directory. Install it via the Unraid
+Community Applications plugin, or manually:
+
+```bash
+installpkg pbc-wrapper-*.txz
+```
+
+`doinst.sh` will create `/etc/pbs-client/repos.d/` (chmod 700) on install.
+
+### Manual
+
 ```bash
 sudo cp pbc-wrapper /usr/local/bin/pbc-wrapper
 sudo chmod +x /usr/local/bin/pbc-wrapper
