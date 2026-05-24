@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+# pbs-client: small wrapper for proxmox-backup-client that loads repo env from files
+# Place me at /usr/local/bin/pbs-client and chmod +x.
+# Default repo directory can be overridden with PBS_PROFILE_DIR or /etc/pbs-client/repos.d
+
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+PROXMOX_CLIENT = "/usr/local/bin/proxmox-backup-client"
+
+ALLOWED_KEYS = {
+    "PBS_REPOSITORY",
+    "PBS_PASSWORD",
+    "PBS_FINGERPRINT",
+    "PBS_ENCRYPTION_PASSWORD",
+    "PBS_KEYFILE",
+}
+
+DEFAULT_DIRS = [
+    os.environ.get("PBS_PROFILE_DIR", ""),
+    "/mnt/user/appdata/pbs/repos.d",
+    "/boot/config/pbs/repos.d",
+    "/etc/pbs-client/repos.d",
+]
+
+
+def find_profile_dir() -> str:
+    for d in DEFAULT_DIRS:
+        if d and Path(d).is_dir():
+            return d
+    return ""
+
+
+def usage(profile_dir: str) -> None:
+    print(f"""\
+pbs-client — wrapper for proxmox-backup-client using named repository profiles
+
+Usage:
+  pbs-client [--profile-dir DIR] [--default NAME] [--list]
+             <proxmox-backup-client subcommand and args…>
+
+Examples:
+  pbs-client backup vm.qcow2:/path --repository my-pbs
+  pbs-client --list
+  pbs-client --default my-pbs backup …      # use NAME if --repository not provided
+
+Profiles live in: {profile_dir}
+Each profile is a file named NAME.env containing environment lines, e.g.:
+  PBS_REPOSITORY="backup@pbs!unraid@10.10.1.50:datastore1"
+  PBS_PASSWORD="your_api_token_secret"
+  PBS_FINGERPRINT="aa:bb:cc:…"
+
+Notes:
+- If --repository VALUE looks like a full repo string (contains ':' or '@pbs@'),
+  it will be passed through unchanged (no profile lookup).""")
+
+
+def list_profiles(profile_dir: str) -> None:
+    print(f"Profiles in: {profile_dir}")
+    env_files = sorted(Path(profile_dir).glob("*.env"))
+    for f in env_files:
+        print(f"  {f.stem}")
+
+
+def load_profile_env(profile_dir: str, name: str) -> None:
+    path = Path(profile_dir) / f"{name}.env"
+    if not path.is_file():
+        print(f"pbs-client: profile '{name}' not found at {path}", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+        if mode > 0o600:
+            print(
+                f"pbs-client: warning: {path} permissions are loose; consider chmod 600.",
+                file=sys.stderr,
+            )
+    except OSError:
+        pass
+
+    # Matches: KEY="value", KEY='value', KEY=value
+    line_re = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)=(.*)$')
+
+    with path.open() as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            m = line_re.match(line)
+            if not m:
+                continue
+            key, val = m.group(1), m.group(2)
+            if key not in ALLOWED_KEYS:
+                continue
+            # Strip surrounding single or double quotes
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+                val = val[1:-1]
+            os.environ[key] = val
+
+
+def looks_like_repo_string(value: str) -> bool:
+    return ":" in value or "@pbs@" in value
+
+
+def main() -> None:
+    args = sys.argv[1:]
+
+    # --- Resolve --profile-dir before anything else ---
+    profile_dir = find_profile_dir()
+
+    if args and args[0] == "--profile-dir":
+        if len(args) < 2:
+            print("pbs-client: --profile-dir requires an argument", file=sys.stderr)
+            sys.exit(1)
+        profile_dir = args[1]
+        args = args[2:]
+
+    # --- Early-exit flags ---
+    if not args or args[0] in ("--help", "-h"):
+        usage(profile_dir)
+        sys.exit(0)
+
+    if args[0] == "--list":
+        if not profile_dir:
+            print(
+                "pbs-client: no profile directory found.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        list_profiles(profile_dir)
+        sys.exit(0)
+
+    # --- --default flag ---
+    default_profile = ""
+    if args and args[0] == "--default":
+        if len(args) < 2:
+            print("pbs-client: --default requires an argument", file=sys.stderr)
+            sys.exit(1)
+        default_profile = args[1]
+        args = args[2:]
+
+    # --- Require a profile dir from here on ---
+    if not profile_dir:
+        print(
+            "pbs-client: no profile directory found. Create one, e.g.: /mnt/user/appdata/pbs/repos.d",
+            file=sys.stderr,
+        )
+        print(
+            "           or run: pbs-client --profile-dir /path/to/repos.d ...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # --- Parse --repository / -r from the remaining args ---
+    repo_arg = ""
+    pass_args: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] in ("--repository", "-r"):
+            if i + 1 >= len(args):
+                print(f"pbs-client: {args[i]} requires an argument", file=sys.stderr)
+                sys.exit(2)
+            repo_arg = args[i + 1]
+            i += 2
+        elif args[i] in ("--profile-dir", "--default", "--list"):
+            print(
+                f"pbs-client: internal option '{args[i]}' should be used before subcommand.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        else:
+            pass_args.append(args[i])
+            i += 1
+
+    if not repo_arg and default_profile:
+        repo_arg = default_profile
+
+    # --- Resolve repo_arg to env or pass-through ---
+    if repo_arg:
+        if looks_like_repo_string(repo_arg):
+            os.environ["PBS_REPOSITORY"] = repo_arg
+        else:
+            load_profile_env(profile_dir, repo_arg)
+
+    # --- Exec proxmox-backup-client ---
+    os.execv(PROXMOX_CLIENT, [PROXMOX_CLIENT] + pass_args)
+
+
+if __name__ == "__main__":
+    main()
