@@ -253,6 +253,14 @@ def main() -> None:
     else:
         log.debug("no repository argument; relying on environment")
 
+    # --- Inject --keyfile explicitly if PBS_KEYFILE is set ---
+    # proxmox-backup-client does not reliably honour the PBS_KEYFILE env var
+    # for all subcommands, so pass it on the command line to be safe.
+    keyfile = os.environ.get("PBS_KEYFILE", "")
+    if keyfile and "--keyfile" not in pass_args:
+        pass_args = ["--keyfile", keyfile] + pass_args
+        log.debug("injected --keyfile %s into args", keyfile)
+
     log.info("exec: %s %s", PROXMOX_CLIENT, " ".join(pass_args))
     log.debug("pass_args: %r", pass_args)
 
