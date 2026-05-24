@@ -22,9 +22,9 @@ ALLOWED_KEYS = {
 
 DEFAULT_DIRS = [
     os.environ.get("PBS_PROFILE_DIR", ""),
-    "/mnt/user/appdata/pbs/repos.d",
-    "/boot/config/pbs/repos.d",
-    "/etc/pbs-client/repos.d",
+    "/mnt/user/appdata/proxmox-backup-client/repos.d",
+    "/boot/etc/proxmox-backup-client/repos.d",
+    "/etc/proxmox-backup-client/repos.d",
 ]
 
 log = logging.getLogger("pbc-wrapper")
@@ -208,7 +208,7 @@ def main() -> None:
     # --- Require a profile dir from here on ---
     if not profile_dir:
         log.error(
-            "no profile directory found. Create one, e.g.: /mnt/user/appdata/pbs/repos.d"
+            "no profile directory found. Create one, e.g.: /mnt/user/appdata/proxmox-backup-client/repos.d"
         )
         print(
             "           or run: pbc-wrapper --profile-dir /path/to/repos.d ...",
