@@ -224,7 +224,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--distro",
-        default="bookworm",
+        default="trixie",
         choices=["bookworm", "trixie"],
         help="Proxmox APT distro to pull binaries from",
     )

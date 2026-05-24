@@ -16,8 +16,8 @@ Build a Slackware `.txz` package that bundles the statically-linked
 
 ```bash
 cd unraid
-python3 build.py                        # pulls from Proxmox bookworm repo
-python3 build.py --distro trixie        # or trixie
+python3 build.py                        # pulls from Proxmox trixie repo (default)
+python3 build.py --distro bookworm      # or bookworm
 python3 build.py --list-packages        # see all available packages
 ```
 
