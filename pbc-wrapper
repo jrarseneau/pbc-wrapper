@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# pbs-client: small wrapper for proxmox-backup-client that loads repo env from files
-# Place me at /usr/local/bin/pbs-client and chmod +x.
+# pbc-wrapper: small wrapper for proxmox-backup-client that loads repo env from files
+# Place me at /usr/local/bin/pbc-wrapper and chmod +x.
 # Default repo directory can be overridden with PBS_PROFILE_DIR or /etc/pbs-client/repos.d
 
 import logging
@@ -27,17 +27,17 @@ DEFAULT_DIRS = [
     "/etc/pbs-client/repos.d",
 ]
 
-log = logging.getLogger("pbs-client")
+log = logging.getLogger("pbc-wrapper")
 
 
 def setup_logging(level_name: str) -> None:
     level = getattr(logging, level_name.upper(), None)
     if not isinstance(level, int):
-        print(f"pbs-client: invalid log level '{level_name}'", file=sys.stderr)
+        print(f"pbc-wrapper: invalid log level '{level_name}'", file=sys.stderr)
         sys.exit(1)
     logging.basicConfig(
         level=level,
-        format="pbs-client: %(levelname)s: %(message)s",
+        format="pbc-wrapper: %(levelname)s: %(message)s",
         stream=sys.stderr,
     )
     log.debug("log level set to %s", level_name.upper())
@@ -56,17 +56,17 @@ def find_profile_dir() -> str:
 
 def usage(profile_dir: str) -> None:
     print(f"""\
-pbs-client — wrapper for proxmox-backup-client using named repository profiles
+pbc-wrapper — wrapper for proxmox-backup-client using named repository profiles
 
 Usage:
-  pbs-client [--profile-dir DIR] [--log-level LEVEL] [--default NAME] [--list]
-             <proxmox-backup-client subcommand and args…>
+  pbc-wrapper [--profile-dir DIR] [--log-level LEVEL] [--default NAME] [--list]
+              <proxmox-backup-client subcommand and args…>
 
 Examples:
-  pbs-client backup vm.qcow2:/path --repository my-pbs
-  pbs-client --list
-  pbs-client --default my-pbs backup …      # use NAME if --repository not provided
-  pbs-client --log-level debug backup …     # verbose wrapper output
+  pbc-wrapper backup vm.qcow2:/path --repository my-pbs
+  pbc-wrapper --list
+  pbc-wrapper --default my-pbs backup …      # use NAME if --repository not provided
+  pbc-wrapper --log-level debug backup …     # verbose wrapper output
 
 Log levels (default WARNING, also via PBS_LOG_LEVEL env var):
   debug, info, warning, error
@@ -150,14 +150,14 @@ def main() -> None:
     while i < len(args):
         if args[i] == "--profile-dir":
             if i + 1 >= len(args):
-                print("pbs-client: --profile-dir requires an argument", file=sys.stderr)
+                print("pbc-wrapper: --profile-dir requires an argument", file=sys.stderr)
                 sys.exit(1)
             profile_dir = args[i + 1]
             log.debug("--profile-dir override: %s", profile_dir)
             i += 2
         elif args[i] == "--log-level":
             if i + 1 >= len(args):
-                print("pbs-client: --log-level requires an argument", file=sys.stderr)
+                print("pbc-wrapper: --log-level requires an argument", file=sys.stderr)
                 sys.exit(1)
             log_level = args[i + 1]
             i += 2
@@ -198,7 +198,7 @@ def main() -> None:
             "no profile directory found. Create one, e.g.: /mnt/user/appdata/pbs/repos.d"
         )
         print(
-            "           or run: pbs-client --profile-dir /path/to/repos.d ...",
+            "           or run: pbc-wrapper --profile-dir /path/to/repos.d ...",
             file=sys.stderr,
         )
         sys.exit(1)
