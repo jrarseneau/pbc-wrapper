@@ -76,10 +76,13 @@ Each profile is a file named NAME.env containing environment lines, e.g.:
   PBS_REPOSITORY="backup@pbs!unraid@10.10.1.50:datastore1"
   PBS_PASSWORD="your_api_token_secret"
   PBS_FINGERPRINT="aa:bb:cc:…"
+  PBS_KEYFILE="/path/to/encryption.key"   # optional; skipped if file not found
 
 Notes:
 - If --repository VALUE looks like a full repo string (contains ':' or '@pbs@'),
-  it will be passed through unchanged (no profile lookup).""")
+  it will be passed through unchanged (no profile lookup).
+- PBS_KEYFILE is optional. If specified, it is only passed to proxmox-backup-client
+  when the file it points to exists on disk.""")
 
 
 def list_profiles(profile_dir: str) -> None:
@@ -128,6 +131,16 @@ def load_profile_env(profile_dir: str, name: str) -> None:
             os.environ[key] = val
             loaded.append(key)
             log.debug("set env var %s", key)
+
+    # PBS_KEYFILE is optional: only keep it if the file actually exists on disk
+    if "PBS_KEYFILE" in loaded:
+        keyfile = os.environ.get("PBS_KEYFILE", "")
+        if Path(keyfile).is_file():
+            log.debug("PBS_KEYFILE exists at %s", keyfile)
+        else:
+            log.debug("PBS_KEYFILE path '%s' not found on disk; skipping", keyfile)
+            del os.environ["PBS_KEYFILE"]
+            loaded.remove("PBS_KEYFILE")
 
     log.info("loaded profile '%s': set %s", name, ", ".join(loaded) if loaded else "(nothing)")
 
