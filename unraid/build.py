@@ -195,9 +195,15 @@ def build_txz(version: str, pkg_dir: Path, output_dir: Path) -> Path:
     pkg_name = f"pbc-wrapper-{version}-{arch}-{build}.txz"
     output_path = output_dir / pkg_name
 
+    # List top-level dirs explicitly instead of "." so archive entries are
+    # "install/slack-desc" not "./install/slack-desc".  Unraid's installpkg
+    # extracts the install dir with `tar xf - install` (no leading ./), which
+    # silently fails to match entries that have the ./ prefix.
+    top_level = sorted(p.name for p in pkg_dir.iterdir())
+
     result = subprocess.run(
         ["tar", "--create", "--xz", "--owner=root", "--group=root",
-         "--file", str(output_path), "--directory", str(pkg_dir), "."],
+         "--file", str(output_path), "--directory", str(pkg_dir)] + top_level,
         capture_output=True,
         text=True,
     )
